@@ -26,8 +26,6 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# RDS Instance
-# Configura una instancia RDS para la base de datos PostgreSQL.
 resource "aws_db_instance" "db" {
   allocated_storage    = 20                            # Almacenamiento asignado en GB.
   engine               = "postgres"                   # Motor de la base de datos (PostgreSQL).
@@ -39,11 +37,18 @@ resource "aws_db_instance" "db" {
   db_subnet_group_name = aws_db_subnet_group.main.name # Grupo de subred asociado.
   multi_az             = false                        # Desactiva la alta disponibilidad multi-AZ.
   skip_final_snapshot  = true                         # No crea un snapshot final al eliminar la instancia.
+  
+  identifier           = "terraform-${var.environment}-rds-${random_id.db_id.hex}" # Nombre único.
 
   tags = {
-    Name = "${var.environment}-rds-instance"           # Etiqueta para identificar la instancia RDS.
+    Name = "${var.environment}-rds-instance"          # Etiqueta para identificar la instancia RDS.
   }
 }
+
+resource "random_id" "db_id" {
+  byte_length = 4 # Genera un ID único de 8 caracteres hexadecimales.
+}
+
 
 # Subnet Group para RDS
 # Define un grupo de subredes para la instancia RDS en las subredes privadas.

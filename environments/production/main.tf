@@ -1,10 +1,10 @@
 terraform {
   backend "s3" {
-    bucket         = "terraform-backend-orbidi"       # Nombre del bucket S3 que creaste
-    key            = "terraform/state/main.tfstate"   # Ruta del archivo de estado en el bucket
-    region         = "us-east-1"                     # Región donde se encuentra el bucket
-    dynamodb_table = "terraform-lock-table"          # Nombre de la tabla DynamoDB que creaste
-    encrypt        = true                            # Habilitar encriptación para el estado
+    bucket         = "terraform-backend-orbidi"
+    key            = "terraform/state/production/main.tfstate" # Clave única para production
+    region         = "us-east-1"
+    dynamodb_table = "terraform-lock-table"
+    encrypt        = true
   }
 }
 
@@ -17,19 +17,11 @@ module "vpc" {
   environment = var.environment  # Se pasa desde el main.tf
 }
 
-# Perfil IAM para instancias de ECS
-# Define un perfil de instancia para roles necesarios en ECS.
-resource "aws_iam_instance_profile" "ecs_instance_profile" {
-  name = "ecsInstanceRole"                  # Nombre del perfil de instancia.
-  role = aws_iam_role.ecs_role.name         # Asocia el perfil con un rol específico.
-}
-
 # Rol IAM para ECS
-# Permite que las instancias ECS asuman este rol para obtener permisos.
 resource "aws_iam_role" "ecs_role" {
-  name = "ecs-role"                         # Nombre del rol IAM.
+  name = "ecs-role-${var.environment}"      # Nombre único basado en el ambiente.
 
-  assume_role_policy = jsonencode({         # Política que permite a EC2 asumir este rol.
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -42,6 +34,13 @@ resource "aws_iam_role" "ecs_role" {
     ]
   })
 }
+
+# Perfil IAM para instancias de ECS
+resource "aws_iam_instance_profile" "ecs_instance_profile" {
+  name = "ecs-instance-profile-${var.environment}"  # Nombre único basado en el ambiente.
+  role = aws_iam_role.ecs_role.name
+}
+
 
 # Security Group para ALB
 # Controla el tráfico de entrada y salida del Application Load Balancer.
