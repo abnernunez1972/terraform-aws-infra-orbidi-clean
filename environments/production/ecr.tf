@@ -1,20 +1,20 @@
 resource "aws_ecr_repository" "fastapi_repo" {
-  name = "fastapi-app"
+  name = "fastapi-app-prodcution"
   image_scanning_configuration {
     scan_on_push = true
   }
   tags = {
-    Name = "fastapi-app"
+    Name = "fastapi-app-prodcution"
   }
 }
 
 resource "aws_ecr_repository" "django_repo" {
-  name = "django-app"
+  name = "django-app-prodcution"
   image_scanning_configuration {
     scan_on_push = true
   }
   tags = {
-    Name = "django-app"
+    Name = "django-app-prodcution"
   }
 }
 
