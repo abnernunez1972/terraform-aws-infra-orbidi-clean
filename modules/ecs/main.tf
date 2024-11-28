@@ -45,21 +45,18 @@ resource "aws_security_group" "ecs" {
 # Launch Template para instancias ECS
 # Define una plantilla de lanzamiento para configurar las instancias ECS.
 resource "aws_launch_template" "ecs_template" {
-  name          = "${var.environment}-ecs-template" # Nombre de la plantilla.
-  image_id      = "ami-0c02fb55956c7d316"           # ID de la AMI (Amazon Linux 2 ECS-Optimized).
+  name          = "${var.environment}-ecs-template" # Nombre del Launch Template.
+  image_id      = "ami-0c02fb55956c7d316"           # ID de la AMI.
   instance_type = "t3.micro"                        # Tipo de instancia.
 
-  # Perfil IAM asociado a las instancias.
   iam_instance_profile {
-    name = "ecsInstanceRole"
+    name = var.iam_instance_profile_name           # Referencia al perfil IAM pasado como variable.
   }
 
-  # Configuración de interfaces de red.
   network_interfaces {
     security_groups = [aws_security_group.ecs.id]  # Asocia el Security Group ECS.
   }
 
-  # Etiquetas para las instancias creadas con esta plantilla.
   tag_specifications {
     resource_type = "instance"
     tags = {
@@ -67,6 +64,7 @@ resource "aws_launch_template" "ecs_template" {
     }
   }
 }
+
 
 # Auto Scaling Group para ECS
 # Configura un grupo de escalado automático para las instancias ECS.

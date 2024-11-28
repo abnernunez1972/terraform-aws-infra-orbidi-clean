@@ -27,3 +27,9 @@ variable "alb_security_group_id" {
   description = "Security Group ID for ALB"
   type        = string
 }
+# modules/ecs/variables.tf
+variable "iam_instance_profile_name" {
+  description = "Nombre del perfil IAM asociado a las instancias"
+  type        = string
+}
+

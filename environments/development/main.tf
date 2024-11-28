@@ -1,12 +1,13 @@
 terraform {
   backend "s3" {
     bucket         = "terraform-backend-orbidi"
-    key            = "terraform/state/development/main.tfstate" # Clave única para development
+    key            = "terraform/state/deveplopment/main.tfstate" # Clave única para production
     region         = "us-east-1"
     dynamodb_table = "terraform-lock-table"
     encrypt        = true
   }
 }
+
 
 
 # Módulo para configurar la VPC
@@ -39,6 +40,7 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "ecs-instance-profile-${var.environment}"  # Nombre único basado en el ambiente.
   role = aws_iam_role.ecs_role.name
 }
+
 
 
 # Security Group para ALB
@@ -140,14 +142,17 @@ resource "aws_security_group" "rds" {
 # Módulo ECS
 # Configura la infraestructura ECS con Auto Scaling y vinculaciones con ALB y RDS.
 module "ecs" {
+  depends_on = [aws_iam_instance_profile.ecs_instance_profile]
   source               = "../../modules/ecs"        # Ruta al módulo ECS.
-  environment          = var.environment  # Se pasa desde el main.tf
-  private_subnets      = module.vpc.private_subnets # Subredes privadas para ECS.
-  public_subnets       = module.vpc.public_subnets  # Subredes públicas para ALB.
+  environment          = var.environment            # Ambiente (development, production, etc.).
+  private_subnets      = module.vpc.private_subnets  # Subredes privadas para ECS.
+  public_subnets       = module.vpc.public_subnets   # Subredes públicas para ALB.
   vpc_id               = module.vpc.vpc_id          # ID de la VPC asociada.
   rds_security_group_id = aws_security_group.rds.id # ID del Security Group de RDS.
   alb_security_group_id = aws_security_group.alb.id # ID del Security Group de ALB.
+  iam_instance_profile_name = aws_iam_instance_profile.ecs_instance_profile.name # Nombre del perfil IAM
 }
+
 
 # Módulo RDS
 # Configura la base de datos relacional en subredes privadas.
@@ -210,4 +215,45 @@ resource "aws_lb_listener" "ecs_listener" {
 resource "aws_autoscaling_attachment" "asg_attachment" {
   autoscaling_group_name = module.ecs.autoscaling_group_name
   lb_target_group_arn    = aws_lb_target_group.ecs_target_group.arn
+}
+
+
+resource "aws_security_group" "bastion" {
+  name        = "bastion-sg-${var.environment}"
+  description = "Security Group for Bastion Host"
+  vpc_id      = module.vpc.vpc_id
+
+  # Permitir acceso SSH desde una IP específica
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr] # Tu IP pública, por ejemplo, "203.0.113.0/32"
+  }
+
+  # Permitir todo el tráfico saliente
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "bastion-sg-${var.environment}"
+  }
+}
+resource "aws_instance" "bastion" {
+  ami           = "ami-0c02fb55956c7d316" # Amazon Linux 2
+  instance_type = "t2.micro"              # Tipo de instancia
+  subnet_id     = module.vpc.public_subnets[0] # Usa la primera subred pública
+  key_name      = var.ssh_key_name        # Llave SSH para acceso seguro
+
+  security_groups = [
+    aws_security_group.bastion.id,       # Asocia el Security Group del bastión
+  ]
+
+  tags = {
+    Name = "bastion-host-${var.environment}" # Etiqueta para identificar el bastión
+  }
 }
