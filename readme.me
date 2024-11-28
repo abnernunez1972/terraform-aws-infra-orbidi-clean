@@ -27,29 +27,30 @@ ____________________________
 Repositorio de terraform
 git@github.com:abnernunez1972/terraform-aws-infra-orbidi-clean.git
 
+
 repositorios de applicaciones
-git@github.com:abnernunez1972/django-api.git
 git@github.com:abnernunez1972/aws-ecs-fastapi.git
+git@github.com:abnernunez1972/django-api.git
 
 
-   --------------------- 
+Ejecución del Script
+Asegúrate de que el script tiene permisos de ejecución:
 
-Autentica tu Docker CLI con ECR usando AWS CLI:
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
-docker build -t fastapi-app:latest .
-docker push 381492063986.dkr.ecr.us-east-1.amazonaws.com/fastapi-app:latest
-docker pull 381492063986.dkr.ecr.us-east-1.amazonaws.com/fastapi-app:latest
-docker run -p 8000:80 fastapi-app:latest
+bash
+chmod +x deploy_to_ecr.sh
+Ejecuta el script:
 
----------------
+bash
+./deploy_to_ecr.sh
 
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 381492063986.dkr.ecr.us-east-1.amazonaws.com
-docker build -t django-app:latest .
-docker tag django-app:latest 381492063986.dkr.ecr.us-east-1.amazonaws.com/django-app:latest
-docker push 381492063986.dkr.ecr.us-east-1.amazonaws.com/django-app:latest
-docker pull 381492063986.dkr.ecr.us-east-1.amazonaws.com/django-app:latest
-docker run -p 8080:8000 381492063986.dkr.ecr.us-east-1.amazonaws.com/django-app:latest
--------------------
+Verificación
+Después de ejecutar el script, verifica en la consola de AWS ECR:
 
+Confirma que las cuatro imágenes están presentes en los repositorios:
+fastapi-app-deveplopment
+fastapi-app-production
+django-app-deveplopment
+django-app-production
 
+-------------------------------
 

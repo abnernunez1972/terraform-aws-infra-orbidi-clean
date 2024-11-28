@@ -18,10 +18,34 @@ resource "aws_ecr_repository" "django_repo" {
   }
 }
 
-output "fastapi_ecr_url" {
-  value = aws_ecr_repository.fastapi_repo.repository_url
+resource "aws_ecr_repository" "fastapi_repo_dev" {
+  name = "fastapi-app-development"
 }
 
-output "django_ecr_url" {
-  value = aws_ecr_repository.django_repo.repository_url
+resource "aws_ecr_repository" "django_repo_dev" {
+  name = "django-app-development"
+}
+
+resource "aws_ecr_repository" "fastapi_repo_prod" {
+  name = "fastapi-app-production"
+}
+
+resource "aws_ecr_repository" "django_repo_prod" {
+  name = "django-app-production"
+}
+
+output "fastapi_repo_dev_url" {
+  value = aws_ecr_repository.fastapi_repo_dev.repository_url
+}
+
+output "django_repo_dev_url" {
+  value = aws_ecr_repository.django_repo_dev.repository_url
+}
+
+output "fastapi_repo_prod_url" {
+  value = aws_ecr_repository.fastapi_repo_prod.repository_url
+}
+
+output "django_repo_prod_url" {
+  value = aws_ecr_repository.django_repo_prod.repository_url
 }
