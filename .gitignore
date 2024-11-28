@@ -1,0 +1,21 @@
+# Terraform-specific files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+terraform.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Logs and temporary files
+*.log
+*.bak
+*.tmp
+
+# Ignore sensitive or personal files
+*.env
+*.backup
