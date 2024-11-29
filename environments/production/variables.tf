@@ -1,5 +1,5 @@
 variable "environment" {
-  description = "The environment name"
+  description = "Environment name (e.g., production, development)"
   type        = string
   default     = "production"
 }
@@ -15,8 +15,12 @@ variable "my_ip_cidr" {
   type        = string
   default     = "0.0.0.0/0" # Permitir acceso desde cualquier IP por defecto (no recomendado en producción)
 }
+
 variable "iam_instance_profile_name" {
   description = "Nombre del perfil IAM asociado a las instancias"
   default     = "ecsInstanceRole"
   type        = string
 }
+
+
+
