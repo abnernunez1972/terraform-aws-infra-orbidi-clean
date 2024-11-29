@@ -13,9 +13,10 @@ terraform {
 # Módulo para configurar la VPC
 # Crea una Virtual Private Cloud con subredes públicas y privadas y tablas de ruteo necesarias.
 module "vpc" {
-  source      = "../../modules/vpc" # Ruta al módulo que define la configuración de la VPC.
-  environment = var.environment  # Se pasa desde el main.tf
+  source      = "../../modules/vpc"
+  environment = var.environment
 }
+
 
 # Rol IAM para ECS
 resource "aws_iam_role" "ecs_role" {
@@ -180,21 +181,24 @@ resource "aws_lb" "ecs_alb" {
 
 # Target Group para ALB
 # Define el grupo de destino para el ALB, asociándolo con ECS.
+# Target Group para ECS
 resource "aws_lb_target_group" "ecs_target_group" {
   name        = "ecs-target-group-${var.environment}" # Nombre del Target Group.
   port        = 80                                    # Puerto del tráfico entrante.
   protocol    = "HTTP"                                # Protocolo HTTP.
   vpc_id      = module.vpc.vpc_id                     # ID de la VPC asociada.
+  target_type = "ip"                                  # Cambia el tipo de destino a IP.
 
   # Configuración de Health Checks para ALB.
   health_check {
-    path                = "/"  # Ruta para verificar la salud.
-    interval            = 30   # Intervalo entre verificaciones (segundos).
-    timeout             = 5    # Tiempo de espera (segundos).
-    healthy_threshold   = 3    # Umbral para considerarse saludable.
-    unhealthy_threshold = 3    # Umbral para considerarse no saludable.
+    path                = "/"                       # Ruta para verificar la salud.
+    interval            = 30                        # Intervalo entre verificaciones (segundos).
+    timeout             = 5                         # Tiempo de espera (segundos).
+    healthy_threshold   = 3                         # Umbral para considerarse saludable.
+    unhealthy_threshold = 3                         # Umbral para considerarse no saludable.
   }
 }
+
 
 # Listener para ALB
 # Configura el Listener para dirigir tráfico al grupo de destino.
@@ -257,3 +261,129 @@ resource "aws_instance" "bastion" {
     Name = "bastion-host-${var.environment}" # Etiqueta para identificar el bastión
   }
 }
+resource "aws_ecs_cluster" "ecs_cluster" {
+  name = "${var.environment}-ecs-cluster"
+}
+
+output "ecs_cluster_id" {
+  description = "ID del ECS Cluster creado"
+  value       = aws_ecs_cluster.ecs_cluster.id
+}
+
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "ecs-task-execution-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+variable "fastapi_container_image" {
+  default = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
+}
+
+variable "django_container_image" {
+  default = "123456789012.dkr.ecr.us-east-1.amazonaws.com/django-repo:latest"
+}
+
+resource "aws_ecs_task_definition" "fastapi_task" {
+  family                   = "fastapi-task-${var.environment}"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+
+  container_definitions = jsonencode([
+    {
+      name      = "fastapi-container"
+      image     = var.fastapi_container_image  # URL de tu ECR
+      essential = true
+      portMappings = [
+        {
+          containerPort = 80
+          protocol      = "tcp"
+        }
+      ]
+    }
+  ])
+
+  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+}
+
+resource "aws_ecs_task_definition" "django_task" {
+  family                   = "django-task-${var.environment}"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+
+  container_definitions = jsonencode([
+    {
+      name      = "django-container"
+      image     = var.django_container_image  # URL de tu ECR
+      essential = true
+      portMappings = [
+        {
+          containerPort = 80
+          protocol      = "tcp"
+        }
+      ]
+    }
+  ])
+
+  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+}
+
+
+resource "aws_ecs_service" "fastapi_service" {
+  name            = "fastapi-service-${var.environment}"
+  cluster         = aws_ecs_cluster.ecs_cluster.id
+  task_definition = aws_ecs_task_definition.fastapi_task.arn
+  desired_count   = 2
+  launch_type     = "EC2"
+
+  network_configuration {
+    subnets         = module.vpc.private_subnets  # Cambia de var.private_subnets a module.vpc.private_subnets
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ecs_target_group.arn
+    container_name   = "fastapi-container"
+    container_port   = 80
+  }
+}
+
+resource "aws_ecs_service" "django_service" {
+  name            = "django-service-${var.environment}"
+  cluster         = aws_ecs_cluster.ecs_cluster.id
+  task_definition = aws_ecs_task_definition.django_task.arn
+  desired_count   = 2
+  launch_type     = "EC2"
+
+  network_configuration {
+    subnets         = module.vpc.private_subnets  # Cambia de var.private_subnets a module.vpc.private_subnets
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ecs_target_group.arn
+    container_name   = "django-container"
+    container_port   = 80
+  }
+}
+
+

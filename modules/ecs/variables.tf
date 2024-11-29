@@ -1,35 +1,34 @@
-variable "environment" {
-  description = "Environment name (e.g., production, development)"
-  type        = string
-}
-
-variable "vpc_id" {
-  description = "The ID of the VPC for ECS"
-  type        = string
-}
-
 variable "private_subnets" {
-  description = "List of private subnets for ECS instances"
+  description = "IDs de las subredes privadas"
   type        = list(string)
 }
 
 variable "public_subnets" {
-  description = "List of public subnets for ALB"
+  description = "IDs de las subredes públicas"
   type        = list(string)
 }
 
+variable "vpc_id" {
+  description = "ID de la VPC"
+  type        = string
+}
+
+variable "environment" {
+  description = "Ambiente (development, production, etc.)"
+  type        = string
+}
+
 variable "rds_security_group_id" {
-  description = "Security Group ID for RDS access"
+  description = "ID del Security Group de RDS"
   type        = string
 }
 
 variable "alb_security_group_id" {
-  description = "Security Group ID for ALB"
-  type        = string
-}
-# modules/ecs/variables.tf
-variable "iam_instance_profile_name" {
-  description = "Nombre del perfil IAM asociado a las instancias"
+  description = "ID del Security Group de ALB"
   type        = string
 }
 
+variable "iam_instance_profile_name" {
+  description = "Nombre del perfil IAM para ECS"
+  type        = string
+}
