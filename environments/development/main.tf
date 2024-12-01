@@ -1,26 +1,22 @@
 terraform {
   backend "s3" {
     bucket         = "terraform-backend-orbidi"
-    key            = "terraform/state/deveplopment/main.tfstate" # Clave única para production
+    key            = "terraform/state/deveplopment/main.tfstate"
     region         = "us-east-1"
     dynamodb_table = "terraform-lock-table"
     encrypt        = true
   }
 }
 
-
-
 # Módulo para configurar la VPC
-# Crea una Virtual Private Cloud con subredes públicas y privadas y tablas de ruteo necesarias.
 module "vpc" {
   source      = "../../modules/vpc"
   environment = var.environment
 }
 
-
 # Rol IAM para ECS
 resource "aws_iam_role" "ecs_role" {
-  name = "ecs-role-${var.environment}"      # Nombre único basado en el ambiente.
+  name = "ecs-role-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -38,26 +34,23 @@ resource "aws_iam_role" "ecs_role" {
 
 # Perfil IAM para instancias de ECS
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
-  name = "ecs-instance-profile-${var.environment}"  # Nombre único basado en el ambiente.
+  name = "ecs-instance-profile-${var.environment}"
   role = aws_iam_role.ecs_role.name
 }
 
-
-
 # Security Group para ALB
-# Controla el tráfico de entrada y salida del Application Load Balancer.
 resource "aws_security_group" "alb" {
-  name        = "alb-sg-${var.environment}" # Nombre del Security Group.
+  name        = "alb-sg-${var.environment}"
   description = "Security Group for ALB"
-  vpc_id      = module.vpc.vpc_id           # ID de la VPC asociada.
+  vpc_id      = module.vpc.vpc_id
 
-  # Reglas de entrada: Permite tráfico HTTP y HTTPS desde cualquier origen.
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   ingress {
     from_port   = 443
     to_port     = 443
@@ -65,7 +58,6 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Reglas de salida: Permite tráfico de cualquier puerto y protocolo.
   egress {
     from_port   = 0
     to_port     = 0
@@ -74,32 +66,30 @@ resource "aws_security_group" "alb" {
   }
 
   tags = {
-    Name = "alb-sg-${var.environment}"      # Etiqueta para identificar el Security Group.
+    Name = "alb-sg-${var.environment}"
   }
 }
 
 # Security Group para ECS
-# Controla el tráfico de entrada y salida para las instancias de ECS.
 resource "aws_security_group" "ecs" {
-  name        = "ecs-sg-${var.environment}" # Nombre del Security Group.
+  name        = "ecs-sg-${var.environment}"
   description = "Security Group for ECS"
-  vpc_id      = module.vpc.vpc_id           # ID de la VPC asociada.
+  vpc_id      = module.vpc.vpc_id
 
-  # Reglas de entrada: Permite tráfico HTTP y HTTPS desde cualquier origen.
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
-  # Reglas de salida: Permite tráfico de cualquier puerto y protocolo.
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -108,18 +98,16 @@ resource "aws_security_group" "ecs" {
   }
 
   tags = {
-    Name = "ecs-sg-${var.environment}"      # Etiqueta para identificar el Security Group.
+    Name = "ecs-sg-${var.environment}"
   }
 }
 
 # Security Group para RDS
-# Controla el tráfico de entrada y salida para la base de datos RDS.
 resource "aws_security_group" "rds" {
-  name        = "rds-sg-${var.environment}" # Nombre del Security Group.
+  name        = "rds-sg-${var.environment}"
   description = "Security Group for RDS"
-  vpc_id      = module.vpc.vpc_id           # ID de la VPC asociada.
+  vpc_id      = module.vpc.vpc_id
 
-  # Reglas de entrada: Permite tráfico desde las instancias ECS al puerto de RDS (5432).
   ingress {
     from_port       = 5432
     to_port         = 5432
@@ -127,7 +115,6 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.ecs.id]
   }
 
-  # Reglas de salida: Permite tráfico de cualquier puerto y protocolo.
   egress {
     from_port   = 0
     to_port     = 0
@@ -136,140 +123,20 @@ resource "aws_security_group" "rds" {
   }
 
   tags = {
-    Name = "rds-sg-${var.environment}"      # Etiqueta para identificar el Security Group.
+    Name = "rds-sg-${var.environment}"
   }
 }
 
-# Módulo ECS
-# Configura la infraestructura ECS con Auto Scaling y vinculaciones con ALB y RDS.
-module "ecs" {
-  depends_on = [aws_iam_instance_profile.ecs_instance_profile]
-  source               = "../../modules/ecs"        # Ruta al módulo ECS.
-  environment          = var.environment            # Ambiente (development, production, etc.).
-  private_subnets      = module.vpc.private_subnets  # Subredes privadas para ECS.
-  public_subnets       = module.vpc.public_subnets   # Subredes públicas para ALB.
-  vpc_id               = module.vpc.vpc_id          # ID de la VPC asociada.
-  rds_security_group_id = aws_security_group.rds.id # ID del Security Group de RDS.
-  alb_security_group_id = aws_security_group.alb.id # ID del Security Group de ALB.
-  iam_instance_profile_name = aws_iam_instance_profile.ecs_instance_profile.name # Nombre del perfil IAM
-}
-
-
-# Módulo RDS
-# Configura la base de datos relacional en subredes privadas.
-module "rds" {
-  source               = "../../modules/rds"        # Ruta al módulo RDS.
-  private_subnets      = module.vpc.private_subnets # Subredes privadas para RDS.
-  vpc_id               = module.vpc.vpc_id          # ID de la VPC asociada.
-  ecs_security_group_id = aws_security_group.ecs.id # ID del Security Group de ECS.
-  environment          = var.environment  # Se pasa desde el main.tf
-}
-
-# Application Load Balancer (ALB)
-# Distribuye tráfico entrante a las instancias ECS en subredes públicas.
-resource "aws_lb" "ecs_alb" {
-  name               = "ecs-alb-${var.environment}" # Nombre del Load Balancer.
-  internal           = false                        # Indica que el ALB es público.
-  load_balancer_type = "application"                # Tipo de Load Balancer.
-  security_groups    = [aws_security_group.alb.id]  # Asocia el Security Group de ALB.
-  subnets            = module.vpc.public_subnets    # Usa subredes públicas.
-
-  tags = {
-    Name = "ecs-alb-${var.environment}"             # Etiqueta para identificar el ALB.
-  }
-}
-
-# Target Group para ALB
-# Define el grupo de destino para el ALB, asociándolo con ECS.
-# Target Group para ECS
-resource "aws_lb_target_group" "ecs_target_group" {
-  name        = "ecs-target-group-${var.environment}" # Nombre del Target Group.
-  port        = 80                                    # Puerto del tráfico entrante.
-  protocol    = "HTTP"                                # Protocolo HTTP.
-  vpc_id      = module.vpc.vpc_id                     # ID de la VPC asociada.
-  target_type = "ip"                                  # Cambia el tipo de destino a IP.
-
-  # Configuración de Health Checks para ALB.
-  health_check {
-    path                = "/"                       # Ruta para verificar la salud.
-    interval            = 30                        # Intervalo entre verificaciones (segundos).
-    timeout             = 5                         # Tiempo de espera (segundos).
-    healthy_threshold   = 3                         # Umbral para considerarse saludable.
-    unhealthy_threshold = 3                         # Umbral para considerarse no saludable.
-  }
-}
-
-
-# Listener para ALB
-# Configura el Listener para dirigir tráfico al grupo de destino.
-resource "aws_lb_listener" "ecs_listener" {
-  load_balancer_arn = aws_lb.ecs_alb.arn             # Asocia el ALB creado.
-  port              = 80                             # Puerto de escucha.
-  protocol          = "HTTP"                         # Protocolo HTTP.
-
-  # Acción por defecto: Dirige el tráfico al grupo de destino.
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.ecs_target_group.arn
-  }
-}
-
-# Auto Scaling Attachment
-# Vincula el grupo de Auto Scaling con el grupo de destino del ALB.
-resource "aws_autoscaling_attachment" "asg_attachment" {
-  autoscaling_group_name = module.ecs.autoscaling_group_name
-  lb_target_group_arn    = aws_lb_target_group.ecs_target_group.arn
-}
-
-
-resource "aws_security_group" "bastion" {
-  name        = "bastion-sg-${var.environment}"
-  description = "Security Group for Bastion Host"
-  vpc_id      = module.vpc.vpc_id
-
-  # Permitir acceso SSH desde una IP específica
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr] # Tu IP pública, por ejemplo, "203.0.113.0/32"
-  }
-
-  # Permitir todo el tráfico saliente
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "bastion-sg-${var.environment}"
-  }
-}
-resource "aws_instance" "bastion" {
-  ami           = "ami-0c02fb55956c7d316" # Amazon Linux 2
-  instance_type = "t2.micro"              # Tipo de instancia
-  subnet_id     = module.vpc.public_subnets[0] # Usa la primera subred pública
-  key_name      = var.ssh_key_name        # Llave SSH para acceso seguro
-
-  security_groups = [
-    aws_security_group.bastion.id,       # Asocia el Security Group del bastión
-  ]
-
-  tags = {
-    Name = "bastion-host-${var.environment}" # Etiqueta para identificar el bastión
-  }
-}
+# ECS Cluster
 resource "aws_ecs_cluster" "ecs_cluster" {
   name = "${var.environment}-ecs-cluster"
 }
 
 output "ecs_cluster_id" {
-  description = "ID del ECS Cluster creado"
-  value       = aws_ecs_cluster.ecs_cluster.id
+  value = aws_ecs_cluster.ecs_cluster.id
 }
 
+# IAM Role para Task Definitions
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "ecs-task-execution-role-${var.environment}"
 
@@ -286,6 +153,7 @@ resource "aws_iam_role" "ecs_task_execution_role" {
     ]
   })
 }
+
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
@@ -299,6 +167,7 @@ variable "django_container_image" {
   default = "123456789012.dkr.ecr.us-east-1.amazonaws.com/django-repo:latest"
 }
 
+# Task Definitions
 resource "aws_ecs_task_definition" "fastapi_task" {
   family                   = "fastapi-task-${var.environment}"
   requires_compatibilities = ["EC2"]
@@ -306,19 +175,15 @@ resource "aws_ecs_task_definition" "fastapi_task" {
   cpu                      = "256"
   memory                   = "512"
 
-  container_definitions = jsonencode([
-    {
-      name      = "fastapi-container"
-      image     = var.fastapi_container_image  # URL de tu ECR
-      essential = true
-      portMappings = [
-        {
-          containerPort = 80
-          protocol      = "tcp"
-        }
-      ]
-    }
-  ])
+  container_definitions = jsonencode([{
+    name      = "fastapi-container"
+    image     = var.fastapi_container_image
+    essential = true
+    portMappings = [{
+      containerPort = 80
+      protocol      = "tcp"
+    }]
+  }])
 
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
 }
@@ -330,24 +195,20 @@ resource "aws_ecs_task_definition" "django_task" {
   cpu                      = "256"
   memory                   = "512"
 
-  container_definitions = jsonencode([
-    {
-      name      = "django-container"
-      image     = var.django_container_image  # URL de tu ECR
-      essential = true
-      portMappings = [
-        {
-          containerPort = 80
-          protocol      = "tcp"
-        }
-      ]
-    }
-  ])
+  container_definitions = jsonencode([{
+    name      = "django-container"
+    image     = var.django_container_image
+    essential = true
+    portMappings = [{
+      containerPort = 80
+      protocol      = "tcp"
+    }]
+  }])
 
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
 }
 
-
+# ECS Services
 resource "aws_ecs_service" "fastapi_service" {
   name            = "fastapi-service-${var.environment}"
   cluster         = aws_ecs_cluster.ecs_cluster.id
@@ -356,7 +217,7 @@ resource "aws_ecs_service" "fastapi_service" {
   launch_type     = "EC2"
 
   network_configuration {
-    subnets         = module.vpc.private_subnets  # Cambia de var.private_subnets a module.vpc.private_subnets
+    subnets         = module.vpc.private_subnets
     security_groups = [aws_security_group.ecs.id]
   }
 
@@ -375,7 +236,7 @@ resource "aws_ecs_service" "django_service" {
   launch_type     = "EC2"
 
   network_configuration {
-    subnets         = module.vpc.private_subnets  # Cambia de var.private_subnets a module.vpc.private_subnets
+    subnets         = module.vpc.private_subnets
     security_groups = [aws_security_group.ecs.id]
   }
 
@@ -386,4 +247,81 @@ resource "aws_ecs_service" "django_service" {
   }
 }
 
+# Application Load Balancer (ALB)
+resource "aws_lb" "ecs_alb" {
+  name               = "${var.environment}-ecs-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = module.vpc.public_subnets
+}
 
+# Target Group
+resource "aws_lb_target_group" "ecs_target_group" {
+  name        = "${var.environment}-ecs-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+  }
+}
+
+# Listener para ALB
+resource "aws_lb_listener" "ecs_listener" {
+  load_balancer_arn = aws_lb.ecs_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ecs_target_group.arn
+  }
+}
+
+# Auto Scaling Group para ECS
+resource "aws_autoscaling_group" "ecs_asg" {
+  desired_capacity    = 2
+  max_size            = 5
+  min_size            = 2
+  vpc_zone_identifier = module.vpc.private_subnets
+
+  launch_template {
+    id      = aws_launch_template.ecs_template.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "${var.environment}-ecs-asg"
+    propagate_at_launch = true
+  }
+}
+
+# Launch Template para ECS
+resource "aws_launch_template" "ecs_template" {
+  name          = "${var.environment}-ecs-template"
+  image_id      = "ami-0c02fb55956c7d316"
+  instance_type = "t3.micro"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ecs_instance_profile.name
+  }
+
+  network_interfaces {
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.environment}-ecs-instance"
+    }
+  }
+}
