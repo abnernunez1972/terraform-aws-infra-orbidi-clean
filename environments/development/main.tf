@@ -8,6 +8,15 @@ terraform {
   }
 }
 
+# Llamar al módulo RDS
+module "rds" {
+  source                 = "../../modules/rds" # Ajusta la ruta según tu estructura de carpetas
+  environment            = var.environment
+  vpc_id                 = module.vpc.vpc_id
+  private_subnets        = module.vpc.private_subnets
+  ecs_security_group_id  = aws_security_group.ecs.id
+}
+
 # Módulo para configurar la VPC
 module "vpc" {
   source      = "../../modules/vpc"
@@ -334,3 +343,73 @@ resource "aws_ecs_service" "django_service" {
     container_port   = 80
   }
 }
+# Security Group para Bastion Host
+resource "aws_security_group" "bastion" {
+  name        = "bastion-sg-${var.environment}"
+  description = "Security Group for Bastion Host"
+  vpc_id      = module.vpc.vpc_id
+
+  # Permitir acceso SSH desde una IP específica
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr] # Cambia a tu IP pública, por ejemplo, "203.0.113.0/32"
+  }
+
+  # Permitir acceso al RDS desde el bastion
+  ingress {
+    from_port   = 5432 # Cambia a 3306 si usas MySQL
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"] # Ajusta según tu rango de VPC
+  }
+
+  # Permitir tráfico saliente
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "bastion-sg-${var.environment}"
+  }
+}
+
+# Instancia EC2 para Bastion Host
+resource "aws_instance" "bastion" {
+  ami           = "ami-0c02fb55956c7d316" # Amazon Linux 2 AMI
+  instance_type = "t3.micro"              # Tipo de instancia
+  subnet_id     = module.vpc.public_subnets[0] # Colocar en una subred pública
+  key_name      = var.ssh_key_name        # Llave SSH para acceso seguro
+
+  # Asociar el Security Group creado
+  security_groups = [
+    aws_security_group.bastion.id,
+  ]
+
+  # Configuración para identificar la instancia
+  tags = {
+    Name = "bastion-host-${var.environment}"
+  }
+}
+
+# Output para conexión SSH
+output "bastion_ssh_connection" {
+  value = "ssh -i /path/to/key.pem ec2-user@${aws_instance.bastion.public_ip}"
+  description = "Comando SSH para conectar al Bastion Host"
+}
+
+# Output de la IP pública del Bastion Host
+output "bastion_public_ip" {
+  value = aws_instance.bastion.public_ip
+  description = "IP pública del Bastion Host"
+}
+
+
+
+
+
+
