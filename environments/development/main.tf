@@ -14,31 +14,66 @@ module "vpc" {
   environment = var.environment
 }
 
-# Rol IAM para ECS
-resource "aws_iam_role" "ecs_role" {
-  name = "ecs-role-${var.environment}"
+# Rol IAM para las instancias EC2 de ECS
+resource "aws_iam_role" "ecs_instance_role" {
+  name = "${var.environment}-ecs-instance-role"
 
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
+    Version = "2012-10-17",
     Statement = [
       {
-        Effect = "Allow"
+        Effect = "Allow",
         Principal = {
           Service = "ec2.amazonaws.com"
-        }
+        },
         Action = "sts:AssumeRole"
       }
     ]
   })
 }
 
-# Perfil IAM para instancias de ECS
-resource "aws_iam_instance_profile" "ecs_instance_profile" {
-  name = "ecs-instance-profile-${var.environment}"
-  role = aws_iam_role.ecs_role.name
+# Adjuntar políticas necesarias al rol IAM para instancias
+resource "aws_iam_role_policy_attachment" "ecs_instance_ecs_policy" {
+  role       = aws_iam_role.ecs_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
-# Security Group para ALB
+resource "aws_iam_role_policy_attachment" "ecs_instance_ecr_policy" {
+  role       = aws_iam_role.ecs_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+# Crear perfil de instancia para asociar el rol
+resource "aws_iam_instance_profile" "ecs_instance_profile" {
+  name = "${var.environment}-ecs-instance-profile"
+  role = aws_iam_role.ecs_instance_role.name
+}
+
+# Rol IAM para tareas ECS
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.environment}-ecs-task-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        },
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Adjuntar política necesaria al rol para tareas ECS
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# Security Groups
 resource "aws_security_group" "alb" {
   name        = "alb-sg-${var.environment}"
   description = "Security Group for ALB"
@@ -64,13 +99,8 @@ resource "aws_security_group" "alb" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = {
-    Name = "alb-sg-${var.environment}"
-  }
 }
 
-# Security Group para ECS
 resource "aws_security_group" "ecs" {
   name        = "ecs-sg-${var.environment}"
   description = "Security Group for ECS"
@@ -96,13 +126,110 @@ resource "aws_security_group" "ecs" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
 
-  tags = {
-    Name = "ecs-sg-${var.environment}"
+# ECS Cluster
+resource "aws_ecs_cluster" "ecs_cluster" {
+  name = "${var.environment}-ecs-cluster"
+}
+
+# Application Load Balancer
+resource "aws_lb" "ecs_alb" {
+  name               = "${var.environment}-ecs-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = module.vpc.public_subnets
+}
+
+# Target Group
+resource "aws_lb_target_group" "ecs_target_group" {
+  name        = "${var.environment}-ecs-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
   }
 }
 
-# Security Group para RDS
+# Listener para ALB
+resource "aws_lb_listener" "ecs_listener" {
+  load_balancer_arn = aws_lb.ecs_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ecs_target_group.arn
+  }
+}
+
+# Launch Template para ECS
+resource "aws_launch_template" "ecs_template" {
+  name          = "${var.environment}-ecs-template"
+  image_id      = "ami-0c02fb55956c7d316" # Amazon Linux ECS-Optimized AMI
+  instance_type = "t3.micro"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ecs_instance_profile.name
+  }
+
+  user_data = base64encode(<<-EOT
+    #!/bin/bash
+    echo "ECS_CLUSTER=${aws_ecs_cluster.ecs_cluster.name}" > /etc/ecs/ecs.config
+    systemctl start ecs
+  EOT
+  )
+
+  network_interfaces {
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.environment}-ecs-instance"
+    }
+  }
+}
+
+# Auto Scaling Group para ECS
+resource "aws_autoscaling_group" "ecs_asg" {
+  desired_capacity    = 2
+  max_size            = 5
+  min_size            = 2
+  vpc_zone_identifier = module.vpc.private_subnets
+
+  launch_template {
+    id      = aws_launch_template.ecs_template.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "${var.environment}-ecs-asg"
+    propagate_at_launch = true
+  }
+}
+
+
+
+variable "fastapi_container_image" {
+  description = "Image URI for the FastAPI container"
+  default     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
+}
+
+variable "django_container_image" {
+  description = "Image URI for the Django container"
+  default     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/django-repo:latest"
+}
 resource "aws_security_group" "rds" {
   name        = "rds-sg-${var.environment}"
   description = "Security Group for RDS"
@@ -127,45 +254,6 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# ECS Cluster
-resource "aws_ecs_cluster" "ecs_cluster" {
-  name = "${var.environment}-ecs-cluster"
-}
-
-output "ecs_cluster_id" {
-  value = aws_ecs_cluster.ecs_cluster.id
-}
-
-# IAM Role para Task Definitions
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "ecs-task-execution-role-${var.environment}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
-  role       = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-variable "fastapi_container_image" {
-  default = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
-}
-
-variable "django_container_image" {
-  default = "123456789012.dkr.ecr.us-east-1.amazonaws.com/django-repo:latest"
-}
 
 # Task Definitions
 resource "aws_ecs_task_definition" "fastapi_task" {
@@ -244,84 +332,5 @@ resource "aws_ecs_service" "django_service" {
     target_group_arn = aws_lb_target_group.ecs_target_group.arn
     container_name   = "django-container"
     container_port   = 80
-  }
-}
-
-# Application Load Balancer (ALB)
-resource "aws_lb" "ecs_alb" {
-  name               = "${var.environment}-ecs-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = module.vpc.public_subnets
-}
-
-# Target Group
-resource "aws_lb_target_group" "ecs_target_group" {
-  name        = "${var.environment}-ecs-tg"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = module.vpc.vpc_id
-  target_type = "ip"
-
-  health_check {
-    path                = "/"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-  }
-}
-
-# Listener para ALB
-resource "aws_lb_listener" "ecs_listener" {
-  load_balancer_arn = aws_lb.ecs_alb.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.ecs_target_group.arn
-  }
-}
-
-# Auto Scaling Group para ECS
-resource "aws_autoscaling_group" "ecs_asg" {
-  desired_capacity    = 2
-  max_size            = 5
-  min_size            = 2
-  vpc_zone_identifier = module.vpc.private_subnets
-
-  launch_template {
-    id      = aws_launch_template.ecs_template.id
-    version = "$Latest"
-  }
-
-  tag {
-    key                 = "Name"
-    value               = "${var.environment}-ecs-asg"
-    propagate_at_launch = true
-  }
-}
-
-# Launch Template para ECS
-resource "aws_launch_template" "ecs_template" {
-  name          = "${var.environment}-ecs-template"
-  image_id      = "ami-0c02fb55956c7d316"
-  instance_type = "t3.micro"
-
-  iam_instance_profile {
-    name = aws_iam_instance_profile.ecs_instance_profile.name
-  }
-
-  network_interfaces {
-    security_groups = [aws_security_group.ecs.id]
-  }
-
-  tag_specifications {
-    resource_type = "instance"
-    tags = {
-      Name = "${var.environment}-ecs-instance"
-    }
   }
 }
